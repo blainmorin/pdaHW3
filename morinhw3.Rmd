@@ -21,11 +21,51 @@ library(sjPlot)
 
 ```
 
+# Question 1:
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+
+### Load and clean data
+
+mcalindon = read_csv("McAlindon_Big.csv")
+
+weather = mcalindon %>%
+  select(ID, WeatherDate, avgtemp, age, race2, inccat, treat, sex, retire, nsaid)
+
+pains = mcalindon %>%
+  select(ID, pain.1, pain.2, pain.3, pain.4, pain.4, pain.5, pain.6, pain.7) %>%
+  group_by(ID) %>%
+  slice(1) 
+  
+pains = pains %>%
+  gather(key = pain.time, value = pain.score, pain.1:pain.7 ) %>%
+  group_by(ID) %>%
+  mutate( index = row_number(ID))
+
+days = mcalindon %>%
+  select(ID, lastdt1, lastdt2, lastdt3, lastdt4, lastdt5, lastdt6, lastdt7) %>%
+  group_by(ID) %>%
+  slice(1)
+
+days = days %>%
+  gather(key = time.name, value = day, lastdt1:lastdt7) %>%
+  mutate(index = row_number(ID))
+
+pain.w.days = pains %>%
+  inner_join(days)
+
+Q1 = pain.w.days %>%
+  rename(WeatherDate = day) %>%
+  inner_join(weather)
+
+```
+
 
 # Question 2:
 
 ```{r, warning = FALSE, echo = FALSE, results='asis'}
 
+### Data Cleaning
 srrs = read.csv("srrs2.txt")
 
 min.srrs = srrs %>%
@@ -55,7 +95,31 @@ Q2 = Q2 %>%
   ungroup()
 
 
+```
 
+
+```{r, echo = FALSE, results = 'asis'}
+
+### Summary table
+
+variables = Q2 %>% 
+  select(activity, which.floor, has.basement, is.sfh, county, Uppm)
+
+variables = model.matrix(~activity + which.floor + has.basement + is.sfh + county + Uppm - 1, data = variables)
+
+variables = as.data.frame(variables)
+
+stargazer(variables, header = FALSE)
+
+
+
+```
+
+
+
+```{r, echo = FALSE, results = 'asis'}
+
+### Run model
 
 mm.Q2 = lmer(activity ~ 
                which.floor + 
