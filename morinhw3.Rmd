@@ -17,7 +17,10 @@ library(nlme)
 library(stargazer)
 library(dplyr)
 library(ggplot2)
-library(sjPlot)
+library(extrafont)
+library(extrafontdb)
+library(grid)
+library(gridExtra)
 
 ```
 
@@ -26,7 +29,6 @@ library(sjPlot)
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 
 ### Load and clean data
-
 mcalindon = read_csv("McAlindon_Big.csv")
 
 weather = mcalindon %>%
@@ -56,7 +58,219 @@ pain.w.days = pains %>%
 
 Q1 = pain.w.days %>%
   rename(WeatherDate = day) %>%
-  inner_join(weather)
+  inner_join(weather) 
+
+
+### Relevel Factors
+Q1 = Q1 %>%
+  mutate(female = ifelse(sex == 2, 1, 0)) %>%
+  mutate(retired = ifelse(retire == 2, 1, 0))
+
+
+### Start each person at day zero
+
+Q1 = Q1 %>%
+  group_by(ID) %>%
+  mutate(day = WeatherDate - min(WeatherDate)) %>%
+  ungroup()
+
+```
+
+
+
+```{r, results = 'asis', echo = FALSE, message = FALSE}
+
+###Summary table
+
+variables1 = Q1 %>%
+  select(pain.score, avgtemp, age, race2, inccat, treat, female, retired, nsaid)
+
+table1 = model.matrix(~ pain.score + avgtemp + age + race2 + as.factor(inccat) + treat + female + retired + nsaid - 1, 
+                    data = variables1)
+
+stargazer(as.data.frame(table1),
+          title = "Summary Statistics",
+          table.placement = "H",
+          header = FALSE,
+          summary.stat = c("mean", "sd", "min", "max", "n"),
+          covariate.labels = c(
+            "Pain Score",
+            "Average Temperature (F)",
+            "Age",
+            "White or Hispanic",
+            "Income < 15k",
+            "Income 15 - 35k",
+            "Income 35 - 55k",
+            "Income 55 - 75k",
+            "Income > 75k",
+            "Treatment Group = 1",
+            "Female = 1",
+            "Retired = 1",
+            "NSAIDs = 1"
+          ))
+
+
+```
+
+```{r, echo = FALSE, results = 'asis'}
+
+### Start with full model
+
+mm1.Q1 = lmer(pain.score ~ (1 + scale(avgtemp) + day| ID) +
+                scale(avgtemp) +
+                day +
+                scale(age) +
+                as.factor(race2) + 
+                as.factor(inccat) + 
+                as.factor(treat) + 
+                as.factor(female) + 
+                as.factor(retired) + 
+                as.factor(nsaid),
+             data = Q1)
+
+mm2.Q1 = lmer(pain.score ~ (1 + day| ID) +
+                scale(avgtemp) +
+                day +
+                scale(age) +
+                as.factor(race2) +  
+                as.factor(treat) + 
+                as.factor(female) + 
+                as.factor(nsaid),
+             data = Q1,
+             na.action = na.exclude,
+             control = lmerControl(optCtrl=list(max=100000000)))
+
+mm3.Q1 = lmer(pain.score ~ (1 + scale(avgtemp)| ID) +
+                scale(avgtemp) +
+                day +
+                scale(age) +
+                as.factor(race2) +  
+                as.factor(treat) + 
+                as.factor(female) + 
+                as.factor(nsaid),
+             data = Q1,
+             control = lmerControl(optCtrl=list(max=100000000)))
+
+mm4.Q1 = lmer(pain.score ~ (1 + day| ID) +
+                scale(avgtemp) +
+                day +
+                day:treat +
+                scale(age) +  
+                as.factor(treat) + 
+                as.factor(nsaid),
+             data = Q1,
+             control = lmerControl(optCtrl=list(max=1000000000)))
+
+
+stargazer(mm1.Q1, mm2.Q1, mm3.Q1, mm4.Q1,
+          title = "Regression Results",
+          table.placement = "H",
+          header = FALSE,
+          dep.var.labels = c("Pain Score"),
+          column.labels = c("Rand Slopes (Temp, Day)", 
+                              "Rand Slope (Day)", 
+                              "Rand Slope (Temp)",
+                              "Rand Slope (Day)"),
+          covariate.labels = c("Avg Temp",
+                               "Day",
+                               "Age",
+                               "White or Hispanic",
+                               "Income 15 - 35k",
+                               "Income 35 - 55k",
+                               "Income 55 - 75k",
+                               "Income > 75k",
+                               "Treatment",
+                               "Female",
+                               "Retired",
+                               "Using NSAIDs",
+                               "Day * Treatment"))
+
+
+```
+
+
+```{r, echo = FALSE}
+
+### Observed vs Predicted for nine people
+
+nine = Q1 %>%
+  mutate(fit = fitted(mm2.Q1)) %>%
+  filter(ID %in% c(178, 180, 237, 315, 447, 469, 499, 581, 737)) %>%
+  mutate(ID = as.factor(ID))
+
+nine %>%
+  ggplot(aes(x = day, y = pain.score, color = ID)) +
+  geom_point(size=3, show.legend = FALSE) + 
+  geom_line( aes(y = fit), size=1, show.legend = FALSE) +
+  facet_wrap(~ID) +
+  ylab("Pain Score") +
+  xlab("Day") +
+  ggtitle("Observed vs Predicted for Nine Random Inidivuals") +
+  theme_classic() +
+  theme(text=element_text(size=12,  family="CM Sans"), strip.background = element_blank())
+  
+```
+
+```{r, fig.height=12, fig.width=12, echo = FALSE}
+
+### Random Effects Plot
+
+yy = ranef(mm2.Q1, condVar = TRUE)
+
+ranef.data = as.data.frame(yy)
+
+ints = ranef.data %>%
+  filter(term == "(Intercept)")
+
+slope = ranef.data %>%
+  filter(term == "day")
+
+slope$ordered = reorder(slope$grp, slope$condval)
+
+labelss = c("Intercept")
+
+int = ggplot(ints, aes(y=grp, x=condval))+
+  geom_point()+
+  geom_errorbarh(aes(xmin=condval-2*condsd,xmax=condval+2*condsd),height=0) +
+  theme_classic() +
+  ylab("Person ID") +
+  xlab("Slope Value") + 
+  ggtitle("Random Intercepts") +
+  theme(text=element_text(size=12,  family="CM Sans"))
+
+slopes = ggplot(slope, aes(y=ordered, x=condval))+
+  geom_point()+
+  geom_errorbarh(aes(xmin=condval-2*condsd, xmax=condval+2*condsd),height=0) +
+  theme_classic() +
+  ylab("Person ID") +
+  xlab("Intercept Value") + 
+  ggtitle("Random Slopes on Day") +
+  theme(text=element_text(size=12,  family="CM Sans"))
+
+grid.arrange(int, slopes, nrow = 1)
+
+
+
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+
+### Residuals plot
+
+Q1 = Q1 %>%
+  mutate(resids = resid(mm2.Q1))
+
+Q1 %>% 
+  ggplot(aes(sample = resids)) + 
+  stat_qq() + 
+  stat_qq_line() +
+  theme_classic() +
+  ylab("Sample Quantile") +
+  xlab("Theoretical Quantile") +
+  ggtitle("Residuals QQ Plot") +
+  theme(text=element_text(size=12,  family="CM Sans"))
+
+
 
 ```
 
@@ -77,24 +291,23 @@ city = read.csv("cty.txt")
 min.city = city %>%
   filter(st == "MN") %>%
   select(stfips, ctfips, st, cty, Uppm)  %>%
-  rename(cntyfips = ctfips)
+  rename(cntyfips = ctfips) %>%
+  group_by(stfips, cntyfips) %>%
+  slice(1) %>%
+  ungroup()
 
 Q2 = inner_join(min.srrs, min.city, by = "cntyfips")
 
 Q2 = Q2 %>%
-  mutate(has.basement = ifelse(basement == "Y", 1, 0)) %>%
-  mutate(is.sfh = ifelse(typebldg == 1, 1, 0)) %>%
-  mutate(which.floor = ifelse(floor == 1, 1, 0)) %>%
-  mutate(activity = log(I(activity+.00001))) %>%
-  mutate(which.floor = as.factor(which.floor)) %>%
-  mutate(has.basement = as.factor(has.basement)) %>%
-  mutate(is.sfh = as.factor(is.sfh)) %>%
-  mutate(Uppm = log(I(Uppm+.0000001))) %>%
-  group_by(idnum) %>%
-  slice(1) %>%
-  ungroup()
-
-
+  mutate(has.basement = as.integer(basement)) %>%
+  mutate(has.basement = as.factor(ifelse(has.basement == 3, 0, ifelse(has.basement == 4, 1 , NA)))) %>%
+  mutate(is.sfh = as.factor(ifelse(typebldg == 1, 1, 0))) %>%
+  mutate(which.floor = as.factor(ifelse(floor == 1, 1, ifelse(floor == 9, NA, 0)))) %>%
+  mutate(log.activity = log(I(activity+.00001))) %>%
+  mutate(log.Uppm = log(I(Uppm+.0000001)))  %>%
+  filter(complete.cases(.))
+  
+  
 ```
 
 
@@ -105,11 +318,15 @@ Q2 = Q2 %>%
 variables = Q2 %>% 
   select(activity, which.floor, has.basement, is.sfh, county, Uppm)
 
-variables = model.matrix(~activity + which.floor + has.basement + is.sfh + county + Uppm - 1, data = variables)
+variables = model.matrix(~activity + which.floor + has.basement + is.sfh + Uppm - 1, data = variables)
 
 variables = as.data.frame(variables)
 
-stargazer(variables, header = FALSE)
+stargazer(variables, 
+          header = FALSE,
+          table.placement = "H",
+          summary.stat = c("mean", "sd", "min", "max", "n"),
+          title = "Summary Statistics")
 
 
 
@@ -121,11 +338,12 @@ stargazer(variables, header = FALSE)
 
 ### Run model
 
-mm.Q2 = lmer(activity ~ 
+mm.Q2 = lmer(log.activity ~ 
                which.floor + 
                has.basement + 
                is.sfh + 
-               (1 + Uppm | county), 
+               log.Uppm +
+               (1 + log.Uppm | cntyfips), 
              data = Q2)  
 
 stargazer(mm.Q2, header = FALSE, table.placement = 'H')
@@ -141,19 +359,15 @@ yy = ranef(mm.Q2, condVar = TRUE)
 
 ranef.data = as.data.frame(yy)
 
-ranef.data = ranef.data %>%
-  rename()
-
-labelss = c("Intercept", "log(County Uranium)")
-
 ggplot(ranef.data, aes(y=grp,x=condval))+
   geom_point()+
   facet_wrap( ~ term, scales="free_x")+
   geom_errorbarh(aes(xmin=condval-2*condsd,xmax=condval+2*condsd),height=0) +
   theme_classic() +
-  ylab("County") +
-  xlab("Conditional Value") + 
-  ggtitle("County Random Effect Distibutions")
+  ylab("County ID") +
+  xlab("Intercept or Slope Value") + 
+  ggtitle("County Random Effect Distibutions") +
+  theme(text=element_text(size=12,  family="CM Sans"), strip.background = element_blank())
 
 ```
 
@@ -179,9 +393,10 @@ ggplot(data = test, aes(x = as.factor(idnum))) +
                color="red") + 
   theme_classic() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  xlab("ID Number") +
+  xlab("House ID Number") +
   ylab("log(Radon Level)") + 
-  ggtitle("Predicted (Black) vs Observed (Red)")
+  ggtitle("Predicted (Black) vs Observed (Red) for 1 House from Each County") +
+  theme(text=element_text(size=12,  family="CM Sans"))
 
 ```
 
@@ -196,9 +411,15 @@ Q22 %>%
   theme_classic() +
   ylab("Sample Quantile") +
   xlab("Theoretical Quantile") +
-  ggtitle("Residuals QQ Plot")
+  ggtitle("Residuals QQ Plot") +
+  theme(text=element_text(size=12,  family="CM Sans"))
   
 
 ```
+
+
+
+
+
 
 
