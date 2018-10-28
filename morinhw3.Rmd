@@ -68,7 +68,6 @@ Q1 = Q1 %>%
 
 
 ### Start each person at day zero
-
 Q1 = Q1 %>%
   group_by(ID) %>%
   mutate(day = WeatherDate - min(WeatherDate)) %>%
@@ -128,6 +127,9 @@ mm1.Q1 = lmer(pain.score ~ (1 + scale(avgtemp) + day| ID) +
                 as.factor(nsaid),
              data = Q1)
 
+
+### Random slope on Day
+
 mm2.Q1 = lmer(pain.score ~ (1 + day| ID) +
                 scale(avgtemp) +
                 day +
@@ -140,6 +142,9 @@ mm2.Q1 = lmer(pain.score ~ (1 + day| ID) +
              na.action = na.exclude,
              control = lmerControl(optCtrl=list(max=100000000)))
 
+
+### Rand Slope on Temp
+
 mm3.Q1 = lmer(pain.score ~ (1 + scale(avgtemp)| ID) +
                 scale(avgtemp) +
                 day +
@@ -151,6 +156,8 @@ mm3.Q1 = lmer(pain.score ~ (1 + scale(avgtemp)| ID) +
              data = Q1,
              control = lmerControl(optCtrl=list(max=100000000)))
 
+
+### Removed sex, checked interaction between treatment and day
 mm4.Q1 = lmer(pain.score ~ (1 + day| ID) +
                 scale(avgtemp) +
                 day +
@@ -162,6 +169,7 @@ mm4.Q1 = lmer(pain.score ~ (1 + day| ID) +
              control = lmerControl(optCtrl=list(max=1000000000)))
 
 
+### Summary table of the 4 regressions
 stargazer(mm1.Q1, mm2.Q1, mm3.Q1, mm4.Q1,
           title = "Regression Results",
           table.placement = "H",
@@ -279,7 +287,7 @@ Q1 %>%
 
 ```{r, warning = FALSE, echo = FALSE, results='asis'}
 
-### Data Cleaning
+### Data import and cleaning
 srrs = read.csv("srrs2.txt")
 
 min.srrs = srrs %>%
